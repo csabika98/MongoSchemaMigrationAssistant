@@ -5,7 +5,7 @@
 
 AI-powered TUI tool for MongoDB schema diffing and migration script generation.
 
-Built with **Java 17 + Lanterna + Anthropic Claude SDK**.
+Built with **Java 17 + JLine 3 + Anthropic Claude SDK**.
 
 ## Features
 
@@ -83,7 +83,7 @@ Select "Use Sample" to see a full insurance domain migration example.
 dev.mongomigrate/
 ├── App.java                 # Entry point
 ├── tui/
-│   └── TuiManager.java      # Lanterna TUI screens & navigation
+│   └── TuiManager.java      # JLine TUI screens & navigation
 ├── core/
 │   ├── SchemaDiffer.java     # Schema comparison engine
 │   ├── DiffEntry.java        # Single diff item model

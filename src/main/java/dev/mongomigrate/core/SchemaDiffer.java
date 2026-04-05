@@ -5,44 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-/**
- * Compares two MongoDB document schemas (as JSON) and produces a DiffResult.
- * <p>
- * Handles nested objects, arrays, type detection, and field renames.
- */
 public class SchemaDiffer {
 
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    /**
-     * Diff two JSON files representing MongoDB document schemas.
-     */
-    public DiffResult diff(File sourceFile, File targetFile) throws IOException {
-        JsonNode source = mapper.readTree(sourceFile);
-        JsonNode target = mapper.readTree(targetFile);
-        return diff(source, target, sourceFile.getName(), targetFile.getName());
-    }
-
-    /**
-     * Diff two JSON strings representing MongoDB document schemas.
-     */
-    public DiffResult diff(String sourceJson, String targetJson,
-                           String sourceLabel, String targetLabel) throws IOException {
+    public DiffResult diff(String sourceJson, String targetJson) throws IOException {
         JsonNode source = mapper.readTree(sourceJson);
         JsonNode target = mapper.readTree(targetJson);
-        return diff(source, target, sourceLabel, targetLabel);
-    }
-
-    /**
-     * Core diff logic operating on parsed JSON nodes.
-     */
-    public DiffResult diff(JsonNode source, JsonNode target,
-                           String sourceLabel, String targetLabel) {
-        DiffResult result = new DiffResult(sourceLabel, targetLabel);
+        DiffResult result = new DiffResult();
         compareNodes(source, target, "", result);
         return result;
     }
@@ -69,22 +42,17 @@ public class SchemaDiffer {
         source.fieldNames().forEachRemaining(sourceFields::add);
         target.fieldNames().forEachRemaining(targetFields::add);
 
-        // Fields in both
         Set<String> common = new LinkedHashSet<>(sourceFields);
         common.retainAll(targetFields);
 
-        // Fields only in source (removed)
         Set<String> removed = new LinkedHashSet<>(sourceFields);
         removed.removeAll(targetFields);
 
-        // Fields only in target (added)
         Set<String> added = new LinkedHashSet<>(targetFields);
         added.removeAll(sourceFields);
 
-        // Check for potential renames: removed field with similar structure to added field
         Map<String, String> renames = detectRenames(source, target, removed, added);
 
-        // Process renames
         for (Map.Entry<String, String> rename : renames.entrySet()) {
             String oldName = rename.getKey();
             String newName = rename.getValue();
@@ -102,7 +70,6 @@ public class SchemaDiffer {
             added.remove(newName);
         }
 
-        // Process removed fields
         for (String field : removed) {
             String fullPath = buildPath(basePath, field);
             result.addEntry(DiffEntry.builder()
@@ -113,7 +80,6 @@ public class SchemaDiffer {
                     .build());
         }
 
-        // Process added fields
         for (String field : added) {
             String fullPath = buildPath(basePath, field);
             result.addEntry(DiffEntry.builder()
@@ -124,7 +90,6 @@ public class SchemaDiffer {
                     .build());
         }
 
-        // Recurse into common fields
         for (String field : common) {
             JsonNode sourceChild = source.get(field);
             JsonNode targetChild = target.get(field);
@@ -143,13 +108,10 @@ public class SchemaDiffer {
             } else if (sourceChild.isArray() && targetChild.isArray()) {
                 compareArrays((ArrayNode) sourceChild, (ArrayNode) targetChild, fullPath, result);
             }
-            // Primitive values with same type — no structural diff needed
         }
     }
 
     private void compareArrays(ArrayNode source, ArrayNode target, String path, DiffResult result) {
-        // For schema diffing, we compare the structure of array elements
-        // Take the first element of each as representative
         if (source.isEmpty() && target.isEmpty()) return;
 
         if (source.isEmpty() || target.isEmpty()) {
@@ -163,16 +125,11 @@ public class SchemaDiffer {
             return;
         }
 
-        // Compare first elements as schema representatives
         JsonNode sourceElem = source.get(0);
         JsonNode targetElem = target.get(0);
         compareNodes(sourceElem, targetElem, path + "[]", result);
     }
 
-    /**
-     * Detect potential field renames by comparing the structure of removed and added fields.
-     * If a removed field's value structure closely matches an added field's, it's likely a rename.
-     */
     private Map<String, String> detectRenames(ObjectNode source, ObjectNode target,
                                                Set<String> removed, Set<String> added) {
         Map<String, String> renames = new LinkedHashMap<>();
@@ -201,10 +158,6 @@ public class SchemaDiffer {
         return renames;
     }
 
-    /**
-     * Creates a structural fingerprint of a JSON node for rename detection.
-     * Only considers structure (field names + types), not values.
-     */
     private String getStructureFingerprint(JsonNode node) {
         if (node.isObject()) {
             TreeMap<String, String> fields = new TreeMap<>();
@@ -216,9 +169,6 @@ public class SchemaDiffer {
         return "primitive";
     }
 
-    /**
-     * Describes the BSON-like type of a JSON node for display purposes.
-     */
     private String describeType(JsonNode node) {
         if (node == null) return "null";
         return switch (node.getNodeType()) {
@@ -232,22 +182,12 @@ public class SchemaDiffer {
         };
     }
 
-    /**
-     * Tries to infer BSON types from string values (e.g., dates, ObjectIds, decimals).
-     */
     private String inferBsonType(String value) {
         if (value == null || value.isEmpty()) return "String";
 
-        // ISO date pattern
         if (value.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*")) return "String(Date?)";
-
-        // ObjectId pattern (24 hex chars)
         if (value.matches("[0-9a-fA-F]{24}")) return "String(ObjectId?)";
-
-        // Decimal pattern
         if (value.matches("-?\\d+\\.\\d+")) return "String(Decimal?)";
-
-        // Integer stored as string
         if (value.matches("-?\\d+")) return "String(Integer?)";
 
         return "String";

@@ -17,7 +17,6 @@ import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.file.Files;
@@ -144,15 +143,10 @@ public class TuiManager {
                 context.setCollectionName(collection);
             }
 
-            context.setSourceFilePath(sourcePath);
-            context.setTargetFilePath(targetPath);
             context.setSourceJson(Files.readString(Path.of(sourcePath)));
             context.setTargetJson(Files.readString(Path.of(targetPath)));
 
-            DiffResult result = differ.diff(
-                    context.getSourceJson(), context.getTargetJson(),
-                    new File(sourcePath).getName(), new File(targetPath).getName()
-            );
+            DiffResult result = differ.diff(context.getSourceJson(), context.getTargetJson());
             context.setDiffResult(result);
 
         } catch (UserInterruptException | EndOfFileException e) {
@@ -185,7 +179,7 @@ public class TuiManager {
             context.setSourceJson(sourceJson);
             context.setTargetJson(targetJson);
 
-            DiffResult result = differ.diff(sourceJson, targetJson, "pasted_source", "pasted_target");
+            DiffResult result = differ.diff(sourceJson, targetJson);
             context.setDiffResult(result);
 
         } catch (UserInterruptException | EndOfFileException e) {
@@ -198,10 +192,7 @@ public class TuiManager {
     private void diffFromSample() {
         loadSampleData();
         try {
-            DiffResult result = differ.diff(
-                    context.getSourceJson(), context.getTargetJson(),
-                    "sample_v1.json", "sample_v2.json"
-            );
+            DiffResult result = differ.diff(context.getSourceJson(), context.getTargetJson());
             context.setDiffResult(result);
             printColored("Loaded sample insurance policy schemas.", AttributedStyle.GREEN);
         } catch (IOException e) {

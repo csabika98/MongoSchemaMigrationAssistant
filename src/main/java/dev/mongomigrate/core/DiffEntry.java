@@ -1,24 +1,21 @@
 package dev.mongomigrate.core;
 
-/**
- * Represents a single difference found between two MongoDB document schemas.
- */
 public class DiffEntry {
 
     public enum ChangeType {
-        ADDED,      // Field exists in target but not source
-        REMOVED,    // Field exists in source but not target
-        RENAMED,    // Field name changed (detected by similar structure)
-        TYPE_CHANGED, // Field type changed (e.g., String -> Date, String -> Decimal128)
-        RESTRUCTURED  // Nested structure changed (e.g., flat -> nested, array changes)
+        ADDED,
+        REMOVED,
+        RENAMED,
+        TYPE_CHANGED,
+        RESTRUCTURED
     }
 
     private final String fieldPath;
     private final ChangeType changeType;
     private final String sourceType;
     private final String targetType;
-    private final String sourceFieldName; // for RENAMED entries
-    private final String targetFieldName; // for RENAMED entries
+    private final String sourceFieldName;
+    private final String targetFieldName;
     private final String description;
 
     private DiffEntry(Builder builder) {
@@ -39,9 +36,6 @@ public class DiffEntry {
     public String getTargetFieldName() { return targetFieldName; }
     public String getDescription() { return description; }
 
-    /**
-     * Returns a human-readable summary of this diff entry.
-     */
     public String toSummary() {
         return switch (changeType) {
             case ADDED -> String.format("[+] %s (%s)", fieldPath, targetType);
@@ -52,18 +46,6 @@ public class DiffEntry {
         };
     }
 
-    /**
-     * Returns the color hint for TUI rendering.
-     */
-    public String getColorHint() {
-        return switch (changeType) {
-            case ADDED -> "GREEN";
-            case REMOVED -> "RED";
-            case RENAMED -> "YELLOW";
-            case TYPE_CHANGED -> "CYAN";
-            case RESTRUCTURED -> "MAGENTA";
-        };
-    }
 
     public static Builder builder() {
         return new Builder();
