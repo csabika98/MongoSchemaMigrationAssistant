@@ -1,6 +1,6 @@
 # MongoDB Migration Assistant
 
-<img width="506" height="371" alt="image" src="https://github.com/user-attachments/assets/04961703-f6d6-4afc-8efd-575b202e1a69" />
+<img width="1323" height="258" alt="image" src="https://github.com/user-attachments/assets/3275e419-07d2-4eae-af66-1d830fb326ee" />
 
 
 AI-powered TUI tool for MongoDB schema diffing and migration script generation.
