@@ -4,13 +4,6 @@ AI-powered TUI tool for MongoDB schema diffing and migration script generation.
 
 Built with **Java 17 + Lanterna + Anthropic Claude SDK**.
 
-```
-  ╔══════════════════════════════════════╗
-  ║   MongoDB Migration Assistant       ║
-  ║   AI-Powered Schema Diff & Migrate  ║
-  ╚══════════════════════════════════════╝
-```
-
 ## Features
 
 - **Schema Diff** — Compare two MongoDB document schemas (JSON files or pasted JSON)
