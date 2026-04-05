@@ -1,5 +1,8 @@
 # MongoDB Migration Assistant
 
+<img width="506" height="371" alt="image" src="https://github.com/user-attachments/assets/04961703-f6d6-4afc-8efd-575b202e1a69" />
+
+
 AI-powered TUI tool for MongoDB schema diffing and migration script generation.
 
 Built with **Java 17 + Lanterna + Anthropic Claude SDK**.
