@@ -10,7 +10,7 @@ import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
-import org.jline.reader.impl.completer.FileNameCompleter;
+import org.jline.builtins.Completers.FileNameCompleter;
 import org.jline.reader.impl.completer.StringsCompleter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
@@ -23,6 +23,7 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
 
 public class TuiManager {
 
@@ -155,6 +156,7 @@ public class TuiManager {
             context.setDiffResult(result);
 
         } catch (UserInterruptException | EndOfFileException e) {
+            // user cancelled input
         } catch (IOException e) {
             printColored("Failed to read files: " + e.getMessage(), AttributedStyle.RED);
         }
@@ -187,6 +189,7 @@ public class TuiManager {
             context.setDiffResult(result);
 
         } catch (UserInterruptException | EndOfFileException e) {
+            // user cancelled input
         } catch (IOException e) {
             printColored("Invalid JSON: " + e.getMessage(), AttributedStyle.RED);
         }
@@ -233,7 +236,8 @@ public class TuiManager {
             int color = colorForChangeType(entry.getChangeType());
             out.println(new AttributedStringBuilder()
                     .style(AttributedStyle.DEFAULT.foreground(color))
-                    .append("  " + entry.toSummary())
+                    .append("  ")
+                    .append(entry.toSummary())
                     .toAnsi(terminal));
         }
         out.println();
@@ -299,7 +303,7 @@ public class TuiManager {
                 out.print("\r  " + frames[i % frames.length] + " Generating migration script (" + mode + ")...");
                 out.flush();
                 i++;
-                try { Thread.sleep(100); } catch (InterruptedException e) { break; }
+                LockSupport.parkNanos(100_000_000L);
             }
             out.print("\r" + " ".repeat(70) + "\r");
             out.flush();
@@ -313,8 +317,10 @@ public class TuiManager {
         printHeader("Generated Migration Script");
         out.println(new AttributedStringBuilder()
                 .style(AttributedStyle.BOLD)
-                .append("  Collection: " + context.getCollectionName() + "  |  Mode: "
-                        + (claude.isAvailable() ? "AI-generated" : "Template"))
+                .append("  Collection: ")
+                .append(context.getCollectionName())
+                .append("  |  Mode: ")
+                .append(claude.isAvailable() ? "AI-generated" : "Template")
                 .toAnsi(terminal));
         printSeparator();
 
@@ -354,16 +360,15 @@ public class TuiManager {
             String filename = fileReader.readLine(prompt("Save as [" + defaultName + "]: ")).trim();
             if (filename.isEmpty()) filename = defaultName;
 
-            Files.writeString(Path.of(filename), context.getGeneratedScript());
-            printColored("Saved to: " + Path.of(filename).toAbsolutePath(), AttributedStyle.GREEN);
+            Path filePath = Path.of(filename);
+            Files.writeString(filePath, context.getGeneratedScript());
+            printColored("Saved to: " + filePath.toAbsolutePath(), AttributedStyle.GREEN);
         } catch (UserInterruptException | EndOfFileException e) {
             // cancelled
         } catch (IOException e) {
             printColored("Failed to save: " + e.getMessage(), AttributedStyle.RED);
         }
     }
-
-    // ── Settings ─────────────────────────────────────────────────
 
     private void showSettings() {
         out.println();
@@ -391,8 +396,6 @@ public class TuiManager {
         out.println();
     }
 
-    // ── About ────────────────────────────────────────────────────
-
     private void showAbout() {
         out.println();
         printHeader("About");
@@ -401,11 +404,9 @@ public class TuiManager {
         out.println("  AI-powered tool for generating MongoDB");
         out.println("  migration scripts from schema diffs.");
         out.println();
-        out.println("  Built with Java + JLine 3 + Claude API");
+        out.println("  Built with Java + jline 3 + Claude API");
         out.println();
     }
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     private void printBanner() {
         out.println();
@@ -428,16 +429,18 @@ public class TuiManager {
         out.println();
 
         if (claude.isAvailable()) {
-            printColored("  Claude API: \u2713 Connected", AttributedStyle.GREEN);
+            printColored("  Claude API: ✓ Connected", AttributedStyle.GREEN);
         } else {
-            printColored("  Claude API: \u2717 Not configured (set ANTHROPIC_API_KEY)", AttributedStyle.YELLOW);
+            printColored("  Claude API: ✗ Not configured (set ANTHROPIC_API_KEY)", AttributedStyle.YELLOW);
         }
     }
 
     private void printHeader(String title) {
         out.println(new AttributedStringBuilder()
                 .style(AttributedStyle.BOLD)
-                .append("── " + title + " ")
+                .append("── ")
+                .append(title)
+                .append(" ")
                 .style(AttributedStyle.DEFAULT)
                 .append("─".repeat(Math.max(0, getWidth() - title.length() - 4)))
                 .toAnsi(terminal));
