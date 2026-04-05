@@ -6,7 +6,6 @@ import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.Model;
 import com.anthropic.models.messages.ContentBlock;
-import com.anthropic.models.messages.TextBlock;
 import dev.mongomigrate.core.DiffEntry;
 import dev.mongomigrate.core.DiffResult;
 
@@ -95,12 +94,10 @@ public class ClaudeService {
 
             Message response = client.messages().create(params);
 
-            // Extract text from response content blocks
             StringBuilder scriptBuilder = new StringBuilder();
             for (ContentBlock block : response.content()) {
-                if (block instanceof TextBlock textBlock) {
-                    scriptBuilder.append(textBlock.text());
-                }
+                block.text().ifPresent(textBlock ->
+                    scriptBuilder.append(textBlock.text()));
             }
 
             return scriptBuilder.toString();
