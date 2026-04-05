@@ -27,7 +27,7 @@ Built with **Java 17 + Lanterna + Anthropic Claude SDK**.
 
 ```bash
 # Clone / navigate to project
-cd mongo-migration-assistant
+cd MongoSchemaMigrationAssistant
 
 # Build
 mvn clean package -q
