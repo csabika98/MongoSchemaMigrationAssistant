@@ -1,0 +1,26 @@
+{
+  "_id": "507f1f77bcf86cd799439011",
+  "policyNumber": "POL-2024-001",
+  "policyHolder": {
+    "name": "John Doe",
+    "email": "",
+    "phone": ""
+  },
+  "premium": 1250.50,
+  "effectiveDate": "2024-01-15T00:00:00Z",
+  "expirationDate": "2025-01-15T00:00:00Z",
+  "status": "active",
+  "coverage": {
+    "type": "comprehensive",
+    "maxAmount": 500000,
+    "deductible": 1000,
+    "riders": []
+  },
+  "assignedAgent": "agent_042",
+  "tags": [],
+  "audit": {
+    "createdAt": "2024-01-10T09:30:00Z",
+    "updatedAt": "",
+    "version": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "_id": "507f1f77bcf86cd799439011",
+  "policyNumber": "POL-2024-001",
+  "holderName": "John Doe",
+  "premium": "1250.50",
+  "startDate": "2024-01-15T00:00:00Z",
+  "endDate": "2025-01-15T00:00:00Z",
+  "status": "active",
+  "coverage": {
+    "type": "comprehensive",
+    "maxAmount": "500000",
+    "deductible": "1000"
+  },
+  "agentId": "agent_042",
+  "notes": "VIP client, handle with care",
+  "createdAt": "2024-01-10T09:30:00Z"
+}
