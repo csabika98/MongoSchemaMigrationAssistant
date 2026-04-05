@@ -1,34 +1,39 @@
 package dev.mongomigrate.tui;
 
-import com.googlecode.lanterna.TerminalSize;
-import com.googlecode.lanterna.TextColor;
-import com.googlecode.lanterna.gui2.*;
-import com.googlecode.lanterna.gui2.dialogs.*;
-import com.googlecode.lanterna.screen.Screen;
-import com.googlecode.lanterna.screen.TerminalScreen;
-import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
-import com.googlecode.lanterna.terminal.Terminal;
 import dev.mongomigrate.ai.ClaudeService;
+import dev.mongomigrate.core.DiffEntry;
 import dev.mongomigrate.core.DiffResult;
 import dev.mongomigrate.core.SchemaDiffer;
 import dev.mongomigrate.model.MigrationContext;
+import org.jetbrains.annotations.NotNull;
+import org.jline.reader.EndOfFileException;
+import org.jline.reader.LineReader;
+import org.jline.reader.LineReaderBuilder;
+import org.jline.reader.UserInterruptException;
+import org.jline.reader.impl.completer.FileNameCompleter;
+import org.jline.reader.impl.completer.StringsCompleter;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.AttributedStringBuilder;
+import org.jline.utils.AttributedStyle;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Manages the Lanterna terminal UI and screen flow.
- */
 public class TuiManager {
 
     private Terminal terminal;
-    private Screen screen;
-    private MultiWindowTextGUI gui;
+    private LineReader reader;
+    private LineReader fileReader;
+    private PrintWriter out;
     private final MigrationContext context;
     private final SchemaDiffer differ;
     private final ClaudeService claude;
+    private volatile boolean running = true;
 
     public TuiManager() {
         this.context = new MigrationContext();
@@ -37,430 +42,479 @@ public class TuiManager {
     }
 
     public void start() throws IOException {
-        terminal = new DefaultTerminalFactory().createTerminal();
-        screen = new TerminalScreen(terminal);
-        screen.startScreen();
+        terminal = TerminalBuilder.builder()
+                .system(true)
+                .build();
+        out = terminal.writer();
 
-        gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLACK));
+        reader = LineReaderBuilder.builder()
+                .terminal(terminal)
+                .completer(new StringsCompleter("1", "2", "3", "4", "diff", "settings", "about", "quit"))
+                .build();
+        reader.setOpt(LineReader.Option.DISABLE_EVENT_EXPANSION);
 
-        showMainMenu();
+        fileReader = LineReaderBuilder.builder()
+                .terminal(terminal)
+                .completer(new FileNameCompleter())
+                .build();
+        fileReader.setOpt(LineReader.Option.DISABLE_EVENT_EXPANSION);
 
-        screen.stopScreen();
+        printBanner();
+
+        while (running) {
+            showMainMenu();
+        }
+
+        out.println();
+        printColored("Goodbye!", AttributedStyle.CYAN);
+        terminal.close();
     }
 
     private void showMainMenu() {
-        BasicWindow window = new BasicWindow("MongoDB Migration Assistant v0.1.0");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
+        out.println();
+        printSeparator();
+        out.println("  1) diff       Schema Diff & Generate Migration Script");
+        out.println("  2) settings   Settings");
+        out.println("  3) about      About");
+        out.println("  4) quit       Exit");
+        out.println();
 
-        Panel mainPanel = new Panel();
-        mainPanel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-        mainPanel.setPreferredSize(new TerminalSize(60, 20));
-
-        // Header
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-        mainPanel.addComponent(new Label("  ╔══════════════════════════════════════╗"));
-        mainPanel.addComponent(new Label("  ║   MongoDB Migration Assistant       ║"));
-        mainPanel.addComponent(new Label("  ║   AI-Powered Schema Diff & Migrate  ║"));
-        mainPanel.addComponent(new Label("  ╚══════════════════════════════════════╝"));
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        // API status
-        String apiStatus = claude.isAvailable()
-                ? "  Claude API: ✓ Connected"
-                : "  Claude API: ✗ Not configured (set ANTHROPIC_API_KEY)";
-        mainPanel.addComponent(new Label(apiStatus));
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-        mainPanel.addComponent(new Separator(Direction.HORIZONTAL).setPreferredSize(new TerminalSize(56, 1)));
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        // Menu buttons
-        Button diffButton = new Button("  1. Schema Diff & Generate Migration Script  ", () -> {
-            window.close();
-            showSchemaInputScreen();
-        });
-
-        Button settingsButton = new Button("  2. Settings                                  ", () -> {
-            window.close();
-            showSettingsScreen();
-        });
-
-        Button aboutButton = new Button("  3. About                                     ", () -> {
-            MessageDialog.showMessageDialog(gui, "About",
-                    "MongoDB Migration Assistant v0.1.0\n\n" +
-                    "AI-powered tool for generating MongoDB\n" +
-                    "migration scripts from schema diffs.\n\n" +
-                    "Built with Java + Lanterna + Claude API");
-        });
-
-        Button quitButton = new Button("  4. Quit                                      ", () -> {
-            window.close();
-        });
-
-        mainPanel.addComponent(diffButton);
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
-        mainPanel.addComponent(settingsButton);
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
-        mainPanel.addComponent(aboutButton);
-        mainPanel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
-        mainPanel.addComponent(quitButton);
-
-        window.setComponent(mainPanel);
-        gui.addWindowAndWait(window);
+        try {
+            String choice = reader.readLine(prompt("> ")).trim().toLowerCase();
+            switch (choice) {
+                case "1", "diff" -> runDiffWorkflow();
+                case "2", "settings" -> showSettings();
+                case "3", "about" -> showAbout();
+                case "4", "quit", "q", "exit" -> running = false;
+                default -> printColored("Unknown option. Enter 1-4.", AttributedStyle.RED);
+            }
+        } catch (UserInterruptException | EndOfFileException e) {
+            running = false;
+        }
     }
 
-    private void showSchemaInputScreen() {
-        BasicWindow window = new BasicWindow("Schema Input");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
 
-        Panel panel = new Panel();
-        panel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-        panel.setPreferredSize(new TerminalSize(65, 22));
+    private void runDiffWorkflow() {
+        out.println();
+        printHeader("Schema Diff");
+        out.println("  How would you like to provide schemas?");
+        out.println();
+        out.println("  1) files    Enter file paths");
+        out.println("  2) paste    Paste JSON directly");
+        out.println("  3) sample   Use built-in sample data");
+        out.println("  4) back     Return to main menu");
+        out.println();
 
-        panel.addComponent(new Label("Enter paths to source and target schema JSON files:"));
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
+        try {
+            String choice = reader.readLine(prompt("> ")).trim().toLowerCase();
+            switch (choice) {
+                case "1", "files" -> diffFromFiles();
+                case "2", "paste" -> diffFromPaste();
+                case "3", "sample" -> diffFromSample();
+                case "4", "back" -> { return; }
+                default -> {
+                    printColored("Unknown option.", AttributedStyle.RED);
+                    return;
+                }
+            }
+        } catch (UserInterruptException | EndOfFileException e) {
+            return;
+        }
 
-        // Source file input
-        panel.addComponent(new Label("Source schema (current):"));
-        TextBox sourceInput = new TextBox(new TerminalSize(60, 1));
-        sourceInput.setText(context.getSourceFilePath() != null ? context.getSourceFilePath() : "");
-        panel.addComponent(sourceInput);
+        if (context.getDiffResult() != null) {
+            showDiffResults();
+        }
+    }
 
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
+    private void diffFromFiles() {
+        try {
+            out.println();
+            String sourcePath = fileReader.readLine(prompt("Source schema file: ")).trim();
+            String targetPath = fileReader.readLine(prompt("Target schema file: ")).trim();
 
-        // Target file input
-        panel.addComponent(new Label("Target schema (desired):"));
-        TextBox targetInput = new TextBox(new TerminalSize(60, 1));
-        targetInput.setText(context.getTargetFilePath() != null ? context.getTargetFilePath() : "");
-        panel.addComponent(targetInput);
+            if (sourcePath.isEmpty() || targetPath.isEmpty()) {
+                printColored("Both file paths are required.", AttributedStyle.RED);
+                return;
+            }
 
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
-
-        // Collection name
-        panel.addComponent(new Label("Collection name:"));
-        TextBox collectionInput = new TextBox(new TerminalSize(60, 1));
-        collectionInput.setText(context.getCollectionName());
-        panel.addComponent(collectionInput);
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-        panel.addComponent(new Separator(Direction.HORIZONTAL).setPreferredSize(new TerminalSize(60, 1)));
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 0)));
-
-        // Or paste JSON directly
-        panel.addComponent(new Label("— OR paste JSON directly (leave file paths empty) —"));
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        // Action buttons
-        Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
-
-        buttonPanel.addComponent(new Button("Run Diff", () -> {
-            String sourcePath = sourceInput.getText().trim();
-            String targetPath = targetInput.getText().trim();
-            String collection = collectionInput.getText().trim();
-
+            String defaultColl = context.getCollectionName();
+            String collection = reader.readLine(prompt("Collection name [" + defaultColl + "]: ")).trim();
             if (!collection.isEmpty()) {
                 context.setCollectionName(collection);
             }
 
-            try {
-                if (!sourcePath.isEmpty() && !targetPath.isEmpty()) {
-                    // File-based input
-                    context.setSourceFilePath(sourcePath);
-                    context.setTargetFilePath(targetPath);
-                    context.setSourceJson(Files.readString(Path.of(sourcePath)));
-                    context.setTargetJson(Files.readString(Path.of(targetPath)));
-                } else {
-                    // No files — show paste dialog
-                    window.close();
-                    showJsonPasteScreen();
-                    return;
-                }
+            context.setSourceFilePath(sourcePath);
+            context.setTargetFilePath(targetPath);
+            context.setSourceJson(Files.readString(Path.of(sourcePath)));
+            context.setTargetJson(Files.readString(Path.of(targetPath)));
 
-                DiffResult result = differ.diff(
-                        context.getSourceJson(), context.getTargetJson(),
-                        new File(sourcePath).getName(), new File(targetPath).getName()
-                );
-                context.setDiffResult(result);
+            DiffResult result = differ.diff(
+                    context.getSourceJson(), context.getTargetJson(),
+                    new File(sourcePath).getName(), new File(targetPath).getName()
+            );
+            context.setDiffResult(result);
 
-                window.close();
-                showDiffResultScreen();
-
-            } catch (IOException e) {
-                MessageDialog.showMessageDialog(gui, "Error",
-                        "Failed to read files:\n" + e.getMessage());
-            }
-        }));
-
-        buttonPanel.addComponent(new Button("Paste JSON", () -> {
-            window.close();
-            showJsonPasteScreen();
-        }));
-
-        buttonPanel.addComponent(new Button("Use Sample", () -> {
-            loadSampleData();
-            try {
-                DiffResult result = differ.diff(
-                        context.getSourceJson(), context.getTargetJson(),
-                        "sample_v1.json", "sample_v2.json"
-                );
-                context.setDiffResult(result);
-                window.close();
-                showDiffResultScreen();
-            } catch (IOException e) {
-                MessageDialog.showMessageDialog(gui, "Error", e.getMessage());
-            }
-        }));
-
-        buttonPanel.addComponent(new Button("Back", () -> {
-            window.close();
-            showMainMenu();
-        }));
-
-        panel.addComponent(buttonPanel);
-        window.setComponent(panel);
-        gui.addWindowAndWait(window);
+        } catch (UserInterruptException | EndOfFileException e) {
+        } catch (IOException e) {
+            printColored("Failed to read files: " + e.getMessage(), AttributedStyle.RED);
+        }
     }
 
-    private void showJsonPasteScreen() {
-        BasicWindow window = new BasicWindow("Paste JSON Schemas");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
-
-        Panel panel = new Panel();
-        panel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-
-        panel.addComponent(new Label("Paste SOURCE schema JSON:"));
-        TextBox sourceBox = new TextBox(new TerminalSize(70, 8), TextBox.Style.MULTI_LINE);
-        panel.addComponent(sourceBox);
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        panel.addComponent(new Label("Paste TARGET schema JSON:"));
-        TextBox targetBox = new TextBox(new TerminalSize(70, 8), TextBox.Style.MULTI_LINE);
-        panel.addComponent(targetBox);
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
-        buttonPanel.addComponent(new Button("Run Diff", () -> {
-            try {
-                context.setSourceJson(sourceBox.getText());
-                context.setTargetJson(targetBox.getText());
-
-                DiffResult result = differ.diff(
-                        context.getSourceJson(), context.getTargetJson(),
-                        "pasted_source", "pasted_target"
-                );
-                context.setDiffResult(result);
-                window.close();
-                showDiffResultScreen();
-            } catch (Exception e) {
-                MessageDialog.showMessageDialog(gui, "Error",
-                        "Invalid JSON:\n" + e.getMessage());
+    private void diffFromPaste() {
+        try {
+            String sourceJson = readMultiLineJson("Paste SOURCE schema JSON (end with empty line):");
+            if (sourceJson == null || sourceJson.isEmpty()) {
+                printColored("No source JSON provided.", AttributedStyle.RED);
+                return;
             }
-        }));
 
-        buttonPanel.addComponent(new Button("Back", () -> {
-            window.close();
-            showSchemaInputScreen();
-        }));
+            String targetJson = readMultiLineJson("Paste TARGET schema JSON (end with empty line):");
+            if (targetJson == null || targetJson.isEmpty()) {
+                printColored("No target JSON provided.", AttributedStyle.RED);
+                return;
+            }
 
-        panel.addComponent(buttonPanel);
-        window.setComponent(panel);
-        gui.addWindowAndWait(window);
+            String defaultColl = context.getCollectionName();
+            String collection = reader.readLine(prompt("Collection name [" + defaultColl + "]: ")).trim();
+            if (!collection.isEmpty()) {
+                context.setCollectionName(collection);
+            }
+
+            context.setSourceJson(sourceJson);
+            context.setTargetJson(targetJson);
+
+            DiffResult result = differ.diff(sourceJson, targetJson, "pasted_source", "pasted_target");
+            context.setDiffResult(result);
+
+        } catch (UserInterruptException | EndOfFileException e) {
+        } catch (IOException e) {
+            printColored("Invalid JSON: " + e.getMessage(), AttributedStyle.RED);
+        }
     }
 
-    private void showDiffResultScreen() {
+    private void diffFromSample() {
+        loadSampleData();
+        try {
+            DiffResult result = differ.diff(
+                    context.getSourceJson(), context.getTargetJson(),
+                    "sample_v1.json", "sample_v2.json"
+            );
+            context.setDiffResult(result);
+            printColored("Loaded sample insurance policy schemas.", AttributedStyle.GREEN);
+        } catch (IOException e) {
+            printColored("Error loading sample: " + e.getMessage(), AttributedStyle.RED);
+        }
+    }
+
+
+    private void showDiffResults() {
         DiffResult diff = context.getDiffResult();
-        BasicWindow window = new BasicWindow("Schema Diff Results");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
-
-        Panel panel = new Panel();
-        panel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-        panel.setPreferredSize(new TerminalSize(75, 25));
+        out.println();
+        printHeader("Diff Results");
 
         if (!diff.hasDifferences()) {
-            panel.addComponent(new Label("✓ No differences found — schemas are identical."));
-            panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-            panel.addComponent(new Button("Back", () -> {
-                window.close();
-                showMainMenu();
-            }));
-        } else {
-            // Summary header
-            panel.addComponent(new Label(String.format(
-                    "Found %d change(s)  |  +%d  -%d  ~%d  T%d  R%d",
-                    diff.totalChanges(),
-                    diff.countByType(dev.mongomigrate.core.DiffEntry.ChangeType.ADDED),
-                    diff.countByType(dev.mongomigrate.core.DiffEntry.ChangeType.REMOVED),
-                    diff.countByType(dev.mongomigrate.core.DiffEntry.ChangeType.RENAMED),
-                    diff.countByType(dev.mongomigrate.core.DiffEntry.ChangeType.TYPE_CHANGED),
-                    diff.countByType(dev.mongomigrate.core.DiffEntry.ChangeType.RESTRUCTURED)
-            )));
-            panel.addComponent(new Separator(Direction.HORIZONTAL).setPreferredSize(new TerminalSize(72, 1)));
-
-            // Diff entries in a scrollable text box
-            TextBox diffView = new TextBox(new TerminalSize(72, 14), TextBox.Style.MULTI_LINE);
-            diffView.setReadOnly(true);
-            diffView.setText(diff.toFormattedSummary());
-            panel.addComponent(diffView);
-
-            panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-            // Action buttons
-            Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
-
-            buttonPanel.addComponent(new Button("Generate Script", () -> {
-                window.close();
-                showGeneratingScreen();
-            }));
-
-            buttonPanel.addComponent(new Button("Back", () -> {
-                window.close();
-                showSchemaInputScreen();
-            }));
-
-            buttonPanel.addComponent(new Button("Main Menu", () -> {
-                window.close();
-                showMainMenu();
-            }));
-
-            panel.addComponent(buttonPanel);
+            printColored("No differences found — schemas are identical.", AttributedStyle.GREEN);
+            return;
         }
 
-        window.setComponent(panel);
-        gui.addWindowAndWait(window);
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD)
+                .append(String.format("  Found %d change(s)  |  +%d  -%d  ~%d  T%d  R%d",
+                        diff.totalChanges(),
+                        diff.countByType(DiffEntry.ChangeType.ADDED),
+                        diff.countByType(DiffEntry.ChangeType.REMOVED),
+                        diff.countByType(DiffEntry.ChangeType.RENAMED),
+                        diff.countByType(DiffEntry.ChangeType.TYPE_CHANGED),
+                        diff.countByType(DiffEntry.ChangeType.RESTRUCTURED)))
+                .toAnsi(terminal));
+        out.println();
+
+        for (DiffEntry entry : diff.getEntries()) {
+            int color = colorForChangeType(entry.getChangeType());
+            out.println(new AttributedStringBuilder()
+                    .style(AttributedStyle.DEFAULT.foreground(color))
+                    .append("  " + entry.toSummary())
+                    .toAnsi(terminal));
+        }
+        out.println();
+
+        scriptActionLoop();
     }
 
-    private void showGeneratingScreen() {
-        // Show a "generating..." message, then produce the script
-        BasicWindow loadingWindow = new BasicWindow("Generating...");
-        loadingWindow.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
-        Panel loadingPanel = new Panel();
-        loadingPanel.addComponent(new Label(claude.isAvailable()
-                ? "Calling Claude API to generate migration script..."
-                : "Generating migration script (template mode)..."));
-        loadingPanel.addComponent(new Label("Please wait..."));
-        loadingWindow.setComponent(loadingPanel);
+    private void scriptActionLoop() {
+        while (true) {
+            out.println("  1) generate   Generate migration script");
+            out.println("  2) back       Return to main menu");
+            out.println();
 
-        // Run generation in background
-        Thread genThread = new Thread(() -> {
-            String script = claude.generateMigrationScript(
-                    context.getDiffResult(),
-                    context.getCollectionName(),
-                    context.getSourceJson(),
-                    context.getTargetJson()
-            );
-            context.setGeneratedScript(script);
-
-            gui.getGUIThread().invokeLater(() -> {
-                loadingWindow.close();
-                showScriptResultScreen();
-            });
-        });
-
-        genThread.setDaemon(true);
-        genThread.start();
-
-        gui.addWindowAndWait(loadingWindow);
-    }
-
-    private void showScriptResultScreen() {
-        BasicWindow window = new BasicWindow("Generated Migration Script");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
-
-        Panel panel = new Panel();
-        panel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-        panel.setPreferredSize(new TerminalSize(80, 28));
-
-        panel.addComponent(new Label(String.format("Collection: %s  |  Mode: %s",
-                context.getCollectionName(),
-                claude.isAvailable() ? "AI-generated" : "Template")));
-        panel.addComponent(new Separator(Direction.HORIZONTAL).setPreferredSize(new TerminalSize(78, 1)));
-
-        // Script view
-        TextBox scriptView = new TextBox(new TerminalSize(78, 20), TextBox.Style.MULTI_LINE);
-        scriptView.setReadOnly(true);
-        scriptView.setText(context.getGeneratedScript());
-        panel.addComponent(scriptView);
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        // Action buttons
-        Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
-
-        buttonPanel.addComponent(new Button("Save to File", () -> {
-            String filename = context.getCollectionName() + "_migration.js";
             try {
-                Files.writeString(Path.of(filename), context.getGeneratedScript());
-                MessageDialog.showMessageDialog(gui, "Saved",
-                        "Script saved to: " + Path.of(filename).toAbsolutePath());
-            } catch (IOException e) {
-                MessageDialog.showMessageDialog(gui, "Error",
-                        "Failed to save: " + e.getMessage());
+                String choice = reader.readLine(prompt("> ")).trim().toLowerCase();
+                switch (choice) {
+                    case "1", "generate" -> {
+                        generateAndShowScript();
+                        return;
+                    }
+                    case "2", "back" -> { return; }
+                    default -> printColored("Unknown option.", AttributedStyle.RED);
+                }
+            } catch (UserInterruptException | EndOfFileException e) {
+                return;
             }
-        }));
-
-        buttonPanel.addComponent(new Button("Regenerate", () -> {
-            window.close();
-            showGeneratingScreen();
-        }));
-
-        buttonPanel.addComponent(new Button("Back to Diff", () -> {
-            window.close();
-            showDiffResultScreen();
-        }));
-
-        buttonPanel.addComponent(new Button("Main Menu", () -> {
-            window.close();
-            showMainMenu();
-        }));
-
-        panel.addComponent(buttonPanel);
-        window.setComponent(panel);
-        gui.addWindowAndWait(window);
+        }
     }
 
-    private void showSettingsScreen() {
-        BasicWindow window = new BasicWindow("Settings");
-        window.setHints(java.util.Arrays.asList(Window.Hint.CENTERED));
 
-        Panel panel = new Panel();
-        panel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
-        panel.setPreferredSize(new TerminalSize(55, 12));
+    private void generateAndShowScript() {
+        String script = generateWithSpinner();
+        context.setGeneratedScript(script);
+        showScriptResult();
+    }
 
-        panel.addComponent(new Label("Default collection name:"));
-        TextBox collInput = new TextBox(new TerminalSize(50, 1));
-        collInput.setText(context.getCollectionName());
-        panel.addComponent(collInput);
+    private String generateWithSpinner() {
+        String mode = claude.isAvailable() ? "Claude API" : "template";
+        AtomicBoolean done = new AtomicBoolean(false);
+        String[] result = new String[1];
 
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
+        Thread spinner = getThread(done, mode);
 
+        result[0] = claude.generateMigrationScript(
+                context.getDiffResult(), context.getCollectionName(),
+                context.getSourceJson(), context.getTargetJson()
+        );
+
+        done.set(true);
+        try { spinner.join(1000); } catch (InterruptedException ignored) {}
+
+        printColored("Done!", AttributedStyle.GREEN);
+        out.println();
+        return result[0];
+    }
+
+    @NotNull
+    private Thread getThread(AtomicBoolean done, String mode) {
+        Thread spinner = new Thread(() -> {
+            String[] frames = {"\u28cb", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"};
+            int i = 0;
+            while (!done.get()) {
+                out.print("\r  " + frames[i % frames.length] + " Generating migration script (" + mode + ")...");
+                out.flush();
+                i++;
+                try { Thread.sleep(100); } catch (InterruptedException e) { break; }
+            }
+            out.print("\r" + " ".repeat(70) + "\r");
+            out.flush();
+        });
+        spinner.setDaemon(true);
+        spinner.start();
+        return spinner;
+    }
+
+    private void showScriptResult() {
+        printHeader("Generated Migration Script");
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD)
+                .append("  Collection: " + context.getCollectionName() + "  |  Mode: "
+                        + (claude.isAvailable() ? "AI-generated" : "Template"))
+                .toAnsi(terminal));
+        printSeparator();
+
+        printPaged(context.getGeneratedScript());
+
+        scriptResultActionLoop();
+    }
+
+    private void scriptResultActionLoop() {
+        while (true) {
+            out.println();
+            out.println("  1) save         Save script to file");
+            out.println("  2) regenerate   Generate again");
+            out.println("  3) menu         Return to main menu");
+            out.println();
+
+            try {
+                String choice = reader.readLine(prompt("> ")).trim().toLowerCase();
+                switch (choice) {
+                    case "1", "save" -> saveScript();
+                    case "2", "regenerate" -> {
+                        generateAndShowScript();
+                        return;
+                    }
+                    case "3", "menu" -> { return; }
+                    default -> printColored("Unknown option.", AttributedStyle.RED);
+                }
+            } catch (UserInterruptException | EndOfFileException e) {
+                return;
+            }
+        }
+    }
+
+    private void saveScript() {
+        try {
+            String defaultName = context.getCollectionName() + "_migration.js";
+            String filename = fileReader.readLine(prompt("Save as [" + defaultName + "]: ")).trim();
+            if (filename.isEmpty()) filename = defaultName;
+
+            Files.writeString(Path.of(filename), context.getGeneratedScript());
+            printColored("Saved to: " + Path.of(filename).toAbsolutePath(), AttributedStyle.GREEN);
+        } catch (UserInterruptException | EndOfFileException e) {
+            // cancelled
+        } catch (IOException e) {
+            printColored("Failed to save: " + e.getMessage(), AttributedStyle.RED);
+        }
+    }
+
+    // ── Settings ─────────────────────────────────────────────────
+
+    private void showSettings() {
+        out.println();
+        printHeader("Settings");
+
+        try {
+            String current = context.getCollectionName();
+            String newName = reader.readLine(prompt("Collection name [" + current + "]: ")).trim();
+            if (!newName.isEmpty()) {
+                context.setCollectionName(newName);
+                printColored("Collection name updated to: " + newName, AttributedStyle.GREEN);
+            }
+        } catch (UserInterruptException | EndOfFileException e) {
+            // cancelled
+        }
+
+        out.println();
         String apiKey = System.getenv("ANTHROPIC_API_KEY");
-        panel.addComponent(new Label("API Key: " +
-                (apiKey != null ? apiKey.substring(0, Math.min(8, apiKey.length())) + "..." : "NOT SET")));
-        panel.addComponent(new Label("Set via: export ANTHROPIC_API_KEY=sk-ant-..."));
-
-        panel.addComponent(new EmptySpace(new TerminalSize(0, 1)));
-
-        Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
-        buttonPanel.addComponent(new Button("Save", () -> {
-            context.setCollectionName(collInput.getText().trim());
-            window.close();
-            showMainMenu();
-        }));
-        buttonPanel.addComponent(new Button("Cancel", () -> {
-            window.close();
-            showMainMenu();
-        }));
-
-        panel.addComponent(buttonPanel);
-        window.setComponent(panel);
-        gui.addWindowAndWait(window);
+        if (apiKey != null && !apiKey.isBlank()) {
+            out.println("  API Key: " + apiKey.substring(0, Math.min(8, apiKey.length())) + "...");
+        } else {
+            printColored("  API Key: NOT SET", AttributedStyle.YELLOW);
+            out.println("  Set via: export ANTHROPIC_API_KEY=sk-ant-...");
+        }
+        out.println();
     }
 
-    /**
-     * Loads sample source/target schemas for quick demo.
-     */
+    // ── About ────────────────────────────────────────────────────
+
+    private void showAbout() {
+        out.println();
+        printHeader("About");
+        out.println("  MongoDB Migration Assistant v0.1.0");
+        out.println();
+        out.println("  AI-powered tool for generating MongoDB");
+        out.println("  migration scripts from schema diffs.");
+        out.println();
+        out.println("  Built with Java + JLine 3 + Claude API");
+        out.println();
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────
+
+    private void printBanner() {
+        out.println();
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD.foreground(AttributedStyle.CYAN))
+                .append("  ╔══════════════════════════════════════╗")
+                .toAnsi(terminal));
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD.foreground(AttributedStyle.CYAN))
+                .append("  ║   MongoDB Migration Assistant       ║")
+                .toAnsi(terminal));
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD.foreground(AttributedStyle.CYAN))
+                .append("  ║   AI-Powered Schema Diff & Migrate  ║")
+                .toAnsi(terminal));
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD.foreground(AttributedStyle.CYAN))
+                .append("  ╚══════════════════════════════════════╝")
+                .toAnsi(terminal));
+        out.println();
+
+        if (claude.isAvailable()) {
+            printColored("  Claude API: \u2713 Connected", AttributedStyle.GREEN);
+        } else {
+            printColored("  Claude API: \u2717 Not configured (set ANTHROPIC_API_KEY)", AttributedStyle.YELLOW);
+        }
+    }
+
+    private void printHeader(String title) {
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD)
+                .append("── " + title + " ")
+                .style(AttributedStyle.DEFAULT)
+                .append("─".repeat(Math.max(0, getWidth() - title.length() - 4)))
+                .toAnsi(terminal));
+    }
+
+    private void printSeparator() {
+        out.println("  " + "─".repeat(Math.max(0, getWidth() - 4)));
+    }
+
+    private void printColored(String msg, int fg) {
+        out.println(new AttributedStringBuilder()
+                .style(AttributedStyle.DEFAULT.foreground(fg))
+                .append(msg)
+                .toAnsi(terminal));
+    }
+
+    private String prompt(String text) {
+        return new AttributedStringBuilder()
+                .style(AttributedStyle.BOLD.foreground(AttributedStyle.CYAN))
+                .append(text)
+                .toAnsi(terminal);
+    }
+
+    private int getWidth() {
+        int w = terminal.getWidth();
+        return w > 0 ? w : 80;
+    }
+
+    private String readMultiLineJson(String label) {
+        out.println();
+        out.println("  " + label);
+        out.println();
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            try {
+                String line = reader.readLine(prompt("| "));
+                if (line.isEmpty()) {
+                    String json = sb.toString().trim();
+                    if (json.isEmpty()) continue;
+                    break;
+                }
+                sb.append(line).append("\n");
+            } catch (UserInterruptException e) {
+                return null;
+            } catch (EndOfFileException e) {
+                break;
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private void printPaged(String text) {
+        String[] lines = text.split("\n");
+        int pageSize = Math.max(terminal.getHeight() - 3, 20);
+        for (int i = 0; i < lines.length; i++) {
+            out.println(lines[i]);
+            if ((i + 1) % pageSize == 0 && i + 1 < lines.length) {
+                try {
+                    String input = reader.readLine(prompt("-- MORE (Enter=next, q=stop) -- "));
+                    if ("q".equalsIgnoreCase(input.trim())) break;
+                } catch (UserInterruptException | EndOfFileException e) {
+                    break;
+                }
+            }
+        }
+    }
+
+    private int colorForChangeType(DiffEntry.ChangeType type) {
+        return switch (type) {
+            case ADDED -> AttributedStyle.GREEN;
+            case REMOVED -> AttributedStyle.RED;
+            case RENAMED -> AttributedStyle.YELLOW;
+            case TYPE_CHANGED -> AttributedStyle.CYAN;
+            case RESTRUCTURED -> AttributedStyle.MAGENTA;
+        };
+    }
+
     private void loadSampleData() {
         context.setCollectionName("insurance_policies");
         context.setSourceJson("""

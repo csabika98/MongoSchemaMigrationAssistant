@@ -9,10 +9,7 @@ import com.anthropic.models.messages.ContentBlock;
 import dev.mongomigrate.core.DiffEntry;
 import dev.mongomigrate.core.DiffResult;
 
-/**
- * Integrates with the Anthropic Claude API to generate MongoDB migration scripts
- * based on schema diff results.
- */
+
 public class ClaudeService {
 
     private static final String SYSTEM_PROMPT = """
@@ -41,7 +38,7 @@ public class ClaudeService {
             """;
 
     private final AnthropicClient client;
-    private boolean available;
+    private final boolean available;
 
     public ClaudeService() {
         AnthropicClient tempClient = null;
@@ -67,15 +64,7 @@ public class ClaudeService {
         return available;
     }
 
-    /**
-     * Generates a migration script based on schema diff results.
-     *
-     * @param diffResult     The computed schema differences
-     * @param collectionName The target MongoDB collection name
-     * @param sourceJson     The source schema JSON (for context)
-     * @param targetJson     The target schema JSON (for context)
-     * @return Generated mongosh migration script
-     */
+
     public String generateMigrationScript(DiffResult diffResult, String collectionName,
                                           String sourceJson, String targetJson) {
         if (!available) {
@@ -130,16 +119,13 @@ public class ClaudeService {
                 Generate the complete mongosh migration script with forward migration and rollback.
                 """,
                 collectionName,
-                truncate(sourceJson, 3000),
-                truncate(targetJson, 3000),
+                truncate(sourceJson),
+                truncate(targetJson),
                 diffResult.toPromptContext()
         );
     }
 
-    /**
-     * Generates a basic migration script without AI — used as fallback when
-     * the API key is not configured or the API call fails.
-     */
+
     public String generateFallbackScript(DiffResult diffResult, String collectionName) {
         StringBuilder sb = new StringBuilder();
         sb.append("// ============================================\n");
@@ -179,7 +165,7 @@ public class ClaudeService {
                     sb.append(");\n\n");
                 }
                 case TYPE_CHANGED -> {
-                    sb.append(generateTypeConversion(entry, collectionName));
+                    sb.append(generateTypeConversion(entry));
                     sb.append("\n");
                 }
                 case RESTRUCTURED -> {
@@ -194,7 +180,6 @@ public class ClaudeService {
         sb.append("print(`Documents after migration: ${afterCount}`);\n");
         sb.append("print(`Migration complete.`);\n\n");
 
-        // Rollback section
         sb.append("// === ROLLBACK ===\n");
         sb.append("// Uncomment the section below to reverse this migration\n");
         sb.append("/*\n");
@@ -218,7 +203,7 @@ public class ClaudeService {
         return sb.toString();
     }
 
-    private String generateTypeConversion(DiffEntry entry, String collectionName) {
+    private String generateTypeConversion(DiffEntry entry) {
         String field = entry.getFieldPath();
         String targetType = entry.getTargetType();
 
@@ -257,13 +242,12 @@ public class ClaudeService {
             case "Boolean" -> "false";
             case "Array" -> "[]";
             case "Object" -> "{}";
-            case "Null" -> "null";
             default -> "null";
         };
     }
 
-    private String truncate(String text, int maxLen) {
+    private String truncate(String text) {
         if (text == null) return "";
-        return text.length() > maxLen ? text.substring(0, maxLen) + "\n// ... (truncated)" : text;
+        return text.length() > 3000 ? text.substring(0, 3000) + "\n// ... (truncated)" : text;
     }
 }
